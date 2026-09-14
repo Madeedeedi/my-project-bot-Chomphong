@@ -1,0 +1,14 @@
+{
+  "name": "spam-guard-bot",
+  "version": "1.0.0",
+  "description": "Discord Anti-Spam Bot",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "dev": "node --watch index.js"
+  },
+  "dependencies": {
+    "discord.js": "^14.14.1",
+    "dotenv": "^16.3.1"
+  }
+}
