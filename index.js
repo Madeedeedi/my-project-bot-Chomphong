@@ -156,9 +156,9 @@ async function handleBannedChannel(message) {
     await message.delete();
   } catch {}
   try {
+    // แบนถาวร โดยไม่ลบข้อความเก่า (ไม่ระบุ deleteMessageSeconds)
     await message.member.ban({
       reason: "พิมพ์ข้อความใน channel ต้องห้าม",
-      deleteMessageSeconds: 60 * 60 * 24,
     });
     console.log(`🔨 แบน: ${message.author.tag} (channel ต้องห้าม)`);
   } catch (err) {
