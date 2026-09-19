@@ -39,6 +39,41 @@ function isStaff(member) {
   return false;
 }
 
+// ============ Mute ============
+async function ensureMuteRole(guild) {
+  let role = guild.roles.cache.find((r) => r.name === "Anti-Spam Mute");
+  if (!role) {
+    try {
+      role = await guild.roles.create({
+        name: "Anti-Spam Mute",
+        permissions: [],
+      });
+    } catch {
+      return null;
+    }
+  }
+  return role;
+}
+
+async function muteUser(member, guild) {
+  const timeoutSeconds = config.muteDuration / 1000;
+  const me = guild.members.me;
+
+  if (me.permissions.has(PermissionFlagsBits.ModerateMembers)) {
+    await member.timeout(config.muteDuration, "กันแสปม");
+    return timeoutSeconds;
+  }
+
+  const muteRole = await ensureMuteRole(guild);
+  if (!muteRole)
+    throw new Error("ไม่สามารถสร้าง role mute ได้ (ต้องการ Manage Roles)");
+  await member.roles.add(muteRole);
+  setTimeout(async () => {
+    await member.roles.remove(muteRole).catch(() => {});
+  }, config.muteDuration);
+  return timeoutSeconds;
+}
+
 // ============ Events ============
 client.once("ready", () => {
   console.log(`✅ Bot กันแสปมพร้อมใช้งาน: ${client.user.tag}`);
@@ -121,9 +156,9 @@ async function handleBannedChannel(message) {
     await message.delete();
   } catch {}
   try {
-    // แบนโดยไม่ลบข้อความเก่า (ไม่ระบุ deleteMessageSeconds)
     await message.member.ban({
       reason: "พิมพ์ข้อความใน channel ต้องห้าม",
+      deleteMessageSeconds: 60 * 60 * 24,
     });
     console.log(`🔨 แบน: ${message.author.tag} (channel ต้องห้าม)`);
   } catch (err) {
@@ -139,23 +174,19 @@ async function handleSpam(message, reason) {
   resetUser(message.guild.id, message.author.id);
   lastMessages.delete(key);
 
-  // ลบเฉพาะข้อความแสปมชิ้นนี้ ไม่แตะข้อความเก่า
   try {
     await message.delete();
   } catch {}
 
   try {
-    // แบนถาวรทันที โดยไม่ระบุ deleteMessageSeconds
-    // → ข้อความปกติที่ผู้ใช้เคยเขียนไว้ก่อนหน้ายังคงอยู่
-    await message.member.ban({ reason });
-    console.log(`🔨 แบนถาวร: ${message.author.tag} (${reason})`);
+    const timeoutSeconds = await muteUser(message.member, message.guild);
     await message.channel
-      .send(`⛔ <@${message.author.id}> ถูกแบนถาวรทันที (${reason})`)
+      .send(`⛔ <@${message.author.id}> ถูก mute ${timeoutSeconds / 60} นาที (${reason})`)
       .catch(() => {});
   } catch (err) {
     console.error("Anti-spam error:", err);
     await message.channel
-      .send(`⚠️ ตรวจพบการแสปมจาก <@${message.author.id}> (${reason}) แต่บอทไม่มีสิทธิ์แบน (ต้องการ BanMembers)`)
+      .send(`⚠️ ตรวจพบการแสปมจาก <@${message.author.id}> (${reason})`)
       .catch(() => {});
   }
 }
