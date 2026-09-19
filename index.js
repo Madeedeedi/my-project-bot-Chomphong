@@ -3,6 +3,7 @@ const {
   Client,
   GatewayIntentBits,
   PermissionFlagsBits,
+  ChannelType,
 } = require("discord.js");
 const config = require("./config");
 
@@ -72,6 +73,35 @@ async function muteUser(member, guild) {
     await member.roles.remove(muteRole).catch(() => {});
   }, config.muteDuration);
   return timeoutSeconds;
+}
+
+// ลบข้อความแสปมของผู้ใช้เฉพาะในช่องธรรมดา
+// ข้าม thread / โพสต์ฟอรั่ม / คอมเมนต์ใต้โพส (โซน "โพส") ไม่ลบ
+async function purgeUserMessages(guild, userId) {
+  let deleted = 0;
+  const oldestAllowed = Date.now() - config.purgeWindowHours * 60 * 60 * 1000;
+  const allowedTypes = [ChannelType.GuildText, ChannelType.GuildAnnouncement];
+
+  for (const channel of guild.channels.cache.values()) {
+    if (!allowedTypes.includes(channel.type)) continue;
+    if (!channel.isTextBased()) continue;
+    if (!channel.viewable) continue;
+    if (!channel.permissionsFor(guild.members.me)?.has(PermissionFlagsBits.ManageMessages)) continue;
+    try {
+      const messages = await channel.messages.fetch({ limit: config.purgePerChannel });
+      const toDelete = messages.filter(
+        (m) =>
+          m.author.id === userId &&
+          m.createdTimestamp >= oldestAllowed &&
+          m.deletable
+      );
+      if (toDelete.size > 0) {
+        await channel.bulkDelete(toDelete, true);
+        deleted += toDelete.size;
+      }
+    } catch {}
+  }
+  return deleted;
 }
 
 // ============ Events ============
@@ -156,12 +186,12 @@ async function handleBannedChannel(message) {
     await message.delete();
   } catch {}
   try {
-    // แบนถาวร พร้อมลบข้อความอื่นๆ ของผู้ใช้ย้อนหลัง 24 ชม.
+    // แบนถาวร (ไม่ใช้ deleteMessageSeconds เพราะต้องเลือกช่องลบเอง) + ลบข้อความแสปมเฉพาะช่องธรรมดา
+    const deleted = await purgeUserMessages(message.guild, message.author.id);
     await message.member.ban({
       reason: "พิมพ์ข้อความใน channel ต้องห้าม",
-      deleteMessageSeconds: 60 * 60 * 24,
     });
-    console.log(`🔨 แบน: ${message.author.tag} (channel ต้องห้าม)`);
+    console.log(`🔨 แบน: ${message.author.tag}, ลบข้อความ ${deleted} ชิ้น (channel ต้องห้าม)`);
   } catch (err) {
     console.error("Ban error:", err);
     await message.channel
@@ -176,13 +206,16 @@ async function handleSpam(message, reason) {
   lastMessages.delete(key);
 
   try {
+    // ลบเฉพาะข้อความแสปมชิ้นนี้
     await message.delete();
   } catch {}
 
   try {
+    // ลบข้อความแสปมในช่องธรรมดา (ข้ามโซนโพส) แล้วค่อย mute
+    const deleted = await purgeUserMessages(message.guild, message.author.id);
     const timeoutSeconds = await muteUser(message.member, message.guild);
     await message.channel
-      .send(`⛔ <@${message.author.id}> ถูก mute ${timeoutSeconds / 60} นาที (${reason})`)
+      .send(`⛔ <@${message.author.id}> ถูก mute ${timeoutSeconds / 60} นาที (${reason})${deleted ? ` ลบข้อความแสปม ${deleted} ชิ้น` : ""}`)
       .catch(() => {});
   } catch (err) {
     console.error("Anti-spam error:", err);
